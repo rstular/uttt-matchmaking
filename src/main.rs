@@ -174,12 +174,12 @@ fn main() -> Result<(), Box<dyn Error>> {
 
                     // Construct HashMap entry - currently, the connection is not associated yet
                     let mut conn_entry: ConnectionEntry = ConnectionEntry {
-                        connection: connection,
+                        connection,
                         assoc_token: None,
                     };
 
                     // Check if there are any unpaired connections
-                    if unpaired_connections.len() == 0 {
+                    if unpaired_connections.is_empty() {
                         // If not, this is the first client
                         debug!("No unpaired connections, adding this connection to unpaired list");
                         unpaired_connections.push_back(token);
@@ -212,17 +212,14 @@ fn main() -> Result<(), Box<dyn Error>> {
                             // If the connection entry does not exist (the client has disappeared),
                             // continue the search. If we've exhausted the list of unpaired connections,
                             // abort the search.
-                            if assoc_conn_entry_ref.is_some() || unpaired_connections.len() == 0 {
+                            if assoc_conn_entry_ref.is_some() || unpaired_connections.is_empty() {
                                 trace!("Search for unpaired connection ended");
                                 break;
                             }
                         }
                         // If we weren't able to find an appropriate unpaired connection, add the current
                         // client to the list of unpaired connections
-                        if assoc_conn_entry_ref.is_none() {
-                            unpaired_connections.push_back(token);
-                            trace!("Unpaired connection no longer available, adding connection to the queue");
-                        } else {
+                        if let Some(assoc_conn_entry_unwr) = assoc_conn_entry_ref {
                             // We were able to find an appropriate unpaired connection. We will attempt pairing.
                             trace!(
                                 "Matched an unpaired connection [{:?}]. Pairing...",
@@ -231,7 +228,7 @@ fn main() -> Result<(), Box<dyn Error>> {
                             // Set the "associated token" field of the current connection
                             conn_entry.assoc_token = Some(assoc_conn_tkn);
                             // Get the mutable ConnectionEntry of the associated connection
-                            let mut assoc_conn_entry = assoc_conn_entry_ref.unwrap().borrow_mut();
+                            let mut assoc_conn_entry = assoc_conn_entry_unwr.borrow_mut();
                             // Set the "associated token" field
                             assoc_conn_entry.assoc_token = Some(token);
 
@@ -267,8 +264,11 @@ fn main() -> Result<(), Box<dyn Error>> {
                                     debug!(
                                         "Successfully notified associated client [{:?}] ({})",
                                         assoc_conn_tkn,
-                                        assoc_conn_entry.connection.peer_addr().unwrap_or(
-                                            SocketAddr::new(IpAddr::V4(Ipv4Addr::UNSPECIFIED), 0)
+                                        assoc_conn_entry.connection.peer_addr().unwrap_or_else(
+                                            |_| SocketAddr::new(
+                                                IpAddr::V4(Ipv4Addr::UNSPECIFIED),
+                                                0
+                                            )
                                         )
                                     );
                                 }
@@ -276,8 +276,11 @@ fn main() -> Result<(), Box<dyn Error>> {
                                     warn!(
                                         "Could not notify associated client [{:?}] ({}): {}",
                                         assoc_conn_tkn,
-                                        assoc_conn_entry.connection.peer_addr().unwrap_or(
-                                            SocketAddr::new(IpAddr::V4(Ipv4Addr::UNSPECIFIED), 0)
+                                        assoc_conn_entry.connection.peer_addr().unwrap_or_else(
+                                            |_| SocketAddr::new(
+                                                IpAddr::V4(Ipv4Addr::UNSPECIFIED),
+                                                0
+                                            )
                                         ),
                                         error.to_string()
                                     );
@@ -287,20 +290,19 @@ fn main() -> Result<(), Box<dyn Error>> {
                                 "Finished pairing clients [addr='{}' {:?}] and [addr='{}' {:?}]",
                                 address,
                                 token,
-                                assoc_conn_entry
-                                    .connection
-                                    .peer_addr()
-                                    .unwrap_or(SocketAddr::new(
-                                        IpAddr::V4(Ipv4Addr::UNSPECIFIED),
-                                        0
-                                    )),
+                                assoc_conn_entry.connection.peer_addr().unwrap_or_else(|_| {
+                                    SocketAddr::new(IpAddr::V4(Ipv4Addr::UNSPECIFIED), 0)
+                                }),
                                 assoc_conn_tkn
                             );
+                        } else {
+                            unpaired_connections.push_back(token);
+                            trace!("Unpaired connection no longer available, adding connection to the queue");
                         }
                     }
 
                     // Add the connection entry to the HashMap
-                    connections.insert(token, RefCell::new(conn_entry.into()));
+                    connections.insert(token, RefCell::new(conn_entry));
                 },
                 // It's a client-related event - token indicates the client
                 token => {
@@ -309,10 +311,9 @@ fn main() -> Result<(), Box<dyn Error>> {
                     let done = if let Some(connection) = connections.get(&token) {
                         // We load the ConnectionEntry of the associated connection
                         let assoc_conn_obj = match connection.borrow().assoc_token {
-                            Some(tkn) => match connections.get(&tkn) {
-                                Some(conn_info) => Some(conn_info.borrow_mut()),
-                                None => None,
-                            },
+                            Some(tkn) => connections
+                                .get(&tkn)
+                                .map(|conn_info| conn_info.borrow_mut()),
                             None => None,
                         };
                         // We call the handler function. If the function tells us the connection
@@ -391,7 +392,7 @@ fn handle_connection_event(
                     "Successfully written data to connection ({})",
                     conn.connection
                         .peer_addr()
-                        .unwrap_or(SocketAddr::new(IpAddr::V4(Ipv4Addr::UNSPECIFIED), 0))
+                        .unwrap_or_else(|_| SocketAddr::new(IpAddr::V4(Ipv4Addr::UNSPECIFIED), 0))
                 );
                 // After we've written something we'll reregister the connection
                 // to only respond to readable events.
@@ -404,7 +405,7 @@ fn handle_connection_event(
                     "Connection not ready for writing ({})",
                     conn.connection
                         .peer_addr()
-                        .unwrap_or(SocketAddr::new(IpAddr::V4(Ipv4Addr::UNSPECIFIED), 0))
+                        .unwrap_or_else(|_| SocketAddr::new(IpAddr::V4(Ipv4Addr::UNSPECIFIED), 0))
                 );
             }
             // Got interrupted (how rude!), we'll try again.
@@ -413,7 +414,7 @@ fn handle_connection_event(
                     "Interrupted while writing to connection ({})",
                     conn.connection
                         .peer_addr()
-                        .unwrap_or(SocketAddr::new(IpAddr::V4(Ipv4Addr::UNSPECIFIED), 0))
+                        .unwrap_or_else(|_| SocketAddr::new(IpAddr::V4(Ipv4Addr::UNSPECIFIED), 0))
                 );
                 return handle_connection_event(registry, conn, None, event);
             }
@@ -442,7 +443,10 @@ fn handle_connection_event(
                         n,
                         conn.connection
                             .peer_addr()
-                            .unwrap_or(SocketAddr::new(IpAddr::V4(Ipv4Addr::UNSPECIFIED), 0))
+                            .unwrap_or_else(|_| SocketAddr::new(
+                                IpAddr::V4(Ipv4Addr::UNSPECIFIED),
+                                0
+                            ))
                     );
                     // If we filled the buffer, stop reading
                     bytes_read += n;
@@ -455,7 +459,10 @@ fn handle_connection_event(
                         "WouldBlock while reading data ({})",
                         conn.connection
                             .peer_addr()
-                            .unwrap_or(SocketAddr::new(IpAddr::V4(Ipv4Addr::UNSPECIFIED), 0))
+                            .unwrap_or_else(|_| SocketAddr::new(
+                                IpAddr::V4(Ipv4Addr::UNSPECIFIED),
+                                0
+                            ))
                     );
                     break;
                 }
@@ -464,7 +471,10 @@ fn handle_connection_event(
                         "Interrupted while reading data ({})",
                         conn.connection
                             .peer_addr()
-                            .unwrap_or(SocketAddr::new(IpAddr::V4(Ipv4Addr::UNSPECIFIED), 0))
+                            .unwrap_or_else(|_| SocketAddr::new(
+                                IpAddr::V4(Ipv4Addr::UNSPECIFIED),
+                                0
+                            ))
                     );
                     break;
                 }
@@ -474,7 +484,10 @@ fn handle_connection_event(
                         error.to_string(),
                         conn.connection
                             .peer_addr()
-                            .unwrap_or(SocketAddr::new(IpAddr::V4(Ipv4Addr::UNSPECIFIED), 0))
+                            .unwrap_or_else(|_| SocketAddr::new(
+                                IpAddr::V4(Ipv4Addr::UNSPECIFIED),
+                                0
+                            ))
                     );
                     return Err(error);
                 }
@@ -493,7 +506,10 @@ fn handle_connection_event(
                             (*assoc_conn_extr)
                                 .connection
                                 .peer_addr()
-                                .unwrap_or(SocketAddr::new(IpAddr::V4(Ipv4Addr::UNSPECIFIED), 0))
+                                .unwrap_or_else(|_| SocketAddr::new(
+                                    IpAddr::V4(Ipv4Addr::UNSPECIFIED),
+                                    0
+                                ))
                         );
                     }
                     Err(error) => {
@@ -503,7 +519,10 @@ fn handle_connection_event(
                             (*assoc_conn_extr)
                                 .connection
                                 .peer_addr()
-                                .unwrap_or(SocketAddr::new(IpAddr::V4(Ipv4Addr::UNSPECIFIED), 0))
+                                .unwrap_or_else(|_| SocketAddr::new(
+                                    IpAddr::V4(Ipv4Addr::UNSPECIFIED),
+                                    0
+                                ))
                         );
                     }
                 };
@@ -518,7 +537,7 @@ fn handle_connection_event(
                 "Connection closed by {}",
                 conn.connection
                     .peer_addr()
-                    .unwrap_or(SocketAddr::new(IpAddr::V4(Ipv4Addr::UNSPECIFIED), 0))
+                    .unwrap_or_else(|_| SocketAddr::new(IpAddr::V4(Ipv4Addr::UNSPECIFIED), 0))
             );
             return Ok(true);
         }
