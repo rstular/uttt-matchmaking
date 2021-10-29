@@ -1,0 +1,7 @@
+{
+    "listen_addr": "127.0.0.1",
+    "listen_port": 19999,
+    "listen_backlog": 16,
+    "keepalive_interval": 15,
+    "keepalive_retries": 3
+}
