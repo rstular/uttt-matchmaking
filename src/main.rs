@@ -337,7 +337,10 @@ fn main() -> Result<(), Box<dyn Error>> {
                         false
                     };
                     if done {
-                        trace!("Removing connection from internal collections [{:?}]", token);
+                        trace!(
+                            "Removing connection from internal collections [{:?}]",
+                            token
+                        );
                         // If the associated connection has a peer, we need to
                         // add the pear to the list of unpaired connections
                         if let Some(assoc_token) =
